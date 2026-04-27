@@ -128,14 +128,16 @@ Any provider whose API key is empty is skipped. Run with one, two, or all three.
     skip-message-patterns: |
       Merge*
       build(deps)*
-      *[skip-review]*
-      *[skip-ci]*
+      *skip-review*
+      *skip-ci*
       *fix code style*
       *Fix Code Style*
       ai-review:*
     skip-author-patterns: |
       *dependabot*
 ```
+
+> **Pattern syntax:** `skip-message-patterns` and `skip-author-patterns` are bash glob patterns. Avoid `[...]` — bash treats it as a character class, not a literal substring. Write `*skip-review*`, not `*[skip-review]*`.
 
 ## How it works
 
