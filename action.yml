@@ -1,0 +1,205 @@
+name: 'AI Commit Review'
+description: 'Review a single commit with Claude, GPT, and Gemini. Files findings as a GitHub Issue and optionally opens a draft fix PR.'
+author: 'leek'
+branding:
+  icon: 'git-commit'
+  color: 'purple'
+
+inputs:
+  commit-sha:
+    description: 'Commit SHA to review. Caller must have run actions/checkout with fetch-depth: 0.'
+    required: true
+
+  anthropic-api-key:
+    description: 'Anthropic API key. Provider runs only when set.'
+    required: false
+    default: ''
+  openai-api-key:
+    description: 'OpenAI API key. Provider runs only when set.'
+    required: false
+    default: ''
+  gemini-api-key:
+    description: 'Gemini API key. Provider runs only when set.'
+    required: false
+    default: ''
+
+  claude-model:
+    description: 'Anthropic model id.'
+    required: false
+    default: 'claude-opus-4-7'
+  openai-model:
+    description: 'OpenAI model id.'
+    required: false
+    default: 'gpt-5.5'
+  gemini-model:
+    description: 'Gemini model id.'
+    required: false
+    default: 'gemini-3.1-pro-preview'
+
+  claude-context-file:
+    description: 'Project context file injected into the Claude prompt. Empty disables.'
+    required: false
+    default: ''
+  openai-context-file:
+    description: 'Project context file injected into the OpenAI prompt. Empty disables.'
+    required: false
+    default: ''
+  gemini-context-file:
+    description: 'Project context file injected into the Gemini prompt. Empty disables.'
+    required: false
+    default: ''
+
+  prompt-file:
+    description: 'Path to a custom prompt template, relative to the workspace. Overrides the bundled generic prompt. Useful for project-specific reviewer rules.'
+    required: false
+    default: ''
+
+  exclude-paths:
+    description: 'Newline-separated git pathspecs excluded from the diff. Each line passed verbatim to git diff. Use the :!path syntax.'
+    required: false
+    default: ''
+
+  max-diff-lines:
+    description: 'Skip review if filtered diff exceeds this many added/changed lines.'
+    required: false
+    default: '5000'
+
+  skip-message-patterns:
+    description: 'Newline-separated bash glob patterns matched against the commit subject. If any matches, the commit is skipped.'
+    required: false
+    default: |
+      Merge*
+  skip-author-patterns:
+    description: 'Newline-separated bash glob patterns matched against the commit author name. If any matches, the commit is skipped.'
+    required: false
+    default: ''
+
+  min-severity-for-issue:
+    description: 'Lowest severity that triggers issue creation. One of: critical, warning, info.'
+    required: false
+    default: 'critical'
+  min-models-for-fix-pr:
+    description: 'Number of providers that must agree on a high-confidence fix before a draft fix PR is opened. Set to 0 to disable fix PRs.'
+    required: false
+    default: '2'
+
+  issue-label:
+    description: 'Label applied to created issues. Created on demand.'
+    required: false
+    default: 'ai-review'
+  issue-title-prefix:
+    description: 'Prefix used in issue titles. The short SHA is appended.'
+    required: false
+    default: '[AI Review]'
+  fix-pr-title-prefix:
+    description: 'Prefix used in fix PR titles. The short SHA is appended.'
+    required: false
+    default: '[AI Fix] Suggested fixes for'
+  fix-branch-prefix:
+    description: 'Branch prefix for fix PRs. Short SHA is appended.'
+    required: false
+    default: 'ai-fix/'
+  base-branch:
+    description: 'Base branch fix PRs target.'
+    required: false
+    default: 'main'
+
+  github-token:
+    description: 'Token used to create issues, comments, branches, and PRs.'
+    required: false
+    default: ${{ github.token }}
+
+  node-version:
+    description: 'Node.js version used to run the review script.'
+    required: false
+    default: '20'
+
+outputs:
+  reviewed:
+    description: 'true if the commit was reviewed, false if skipped.'
+    value: ${{ steps.review.outputs.reviewed }}
+  skip-reason:
+    description: 'Reason the commit was skipped, if any.'
+    value: ${{ steps.check.outputs.skip_reason }}
+  diff-line-count:
+    description: 'Added/changed line count of the filtered diff.'
+    value: ${{ steps.diff.outputs.line_count }}
+  critical-count:
+    description: 'Number of critical findings after dedup.'
+    value: ${{ steps.digest.outputs.critical_count }}
+  warning-count:
+    description: 'Number of warning findings after dedup.'
+    value: ${{ steps.digest.outputs.warning_count }}
+  info-count:
+    description: 'Number of info findings after dedup.'
+    value: ${{ steps.digest.outputs.info_count }}
+  issue-url:
+    description: 'URL of the created issue, if any.'
+    value: ${{ steps.digest.outputs.issue_url }}
+  fix-pr-url:
+    description: 'URL of the created draft fix PR, if any.'
+    value: ${{ steps.digest.outputs.fix_pr_url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Check if review should run
+      id: check
+      shell: bash
+      env:
+        COMMIT_SHA: ${{ inputs.commit-sha }}
+        SKIP_MESSAGE_PATTERNS: ${{ inputs.skip-message-patterns }}
+        SKIP_AUTHOR_PATTERNS: ${{ inputs.skip-author-patterns }}
+      run: bash "${{ github.action_path }}/scripts/check-skip.sh"
+
+    - name: Extract and filter diff
+      if: steps.check.outputs.should_review == 'true'
+      id: diff
+      shell: bash
+      env:
+        COMMIT_SHA: ${{ inputs.commit-sha }}
+        EXCLUDE_PATHS: ${{ inputs.exclude-paths }}
+        MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
+      run: bash "${{ github.action_path }}/scripts/extract-diff.sh"
+
+    - name: Run providers
+      id: review
+      if: steps.check.outputs.should_review == 'true' && steps.diff.outputs.skip_large != 'true'
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        CLAUDE_MODEL: ${{ inputs.claude-model }}
+        OPENAI_MODEL: ${{ inputs.openai-model }}
+        GEMINI_MODEL: ${{ inputs.gemini-model }}
+        CLAUDE_CONTEXT_FILE: ${{ inputs.claude-context-file }}
+        OPENAI_CONTEXT_FILE: ${{ inputs.openai-context-file }}
+        GEMINI_CONTEXT_FILE: ${{ inputs.gemini-context-file }}
+        PROMPT_FILE: ${{ inputs.prompt-file }}
+        SCRIPT_DIR: ${{ github.action_path }}/scripts
+      run: bash "${{ github.action_path }}/scripts/run-providers.sh"
+
+    - name: Create digest
+      id: digest
+      if: steps.check.outputs.should_review == 'true' && steps.diff.outputs.skip_large != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        COMMIT_SHA: ${{ inputs.commit-sha }}
+        MIN_SEVERITY_FOR_ISSUE: ${{ inputs.min-severity-for-issue }}
+        MIN_MODELS_FOR_FIX_PR: ${{ inputs.min-models-for-fix-pr }}
+        ISSUE_LABEL: ${{ inputs.issue-label }}
+        ISSUE_TITLE_PREFIX: ${{ inputs.issue-title-prefix }}
+        FIX_PR_TITLE_PREFIX: ${{ inputs.fix-pr-title-prefix }}
+        FIX_BRANCH_PREFIX: ${{ inputs.fix-branch-prefix }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        CLAUDE_MODEL: ${{ inputs.claude-model }}
+        OPENAI_MODEL: ${{ inputs.openai-model }}
+        GEMINI_MODEL: ${{ inputs.gemini-model }}
+      run: bash "${{ github.action_path }}/scripts/ai-review-digest.sh"
