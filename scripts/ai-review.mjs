@@ -13,6 +13,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { argv, stdin, stdout, stderr, exit } from 'node:process';
 
 const PROVIDERS = {
@@ -208,6 +209,50 @@ function parseFindings(text) {
   }
 }
 
+/**
+ * Phrases a model uses when it talks itself out of a finding it just filed.
+ * The prompt already tells models to drop these (rule 6), but they routinely
+ * ignore it and ship the retraction in the description anyway, so we strip
+ * them deterministically. Kept high-precision to avoid nuking genuine
+ * findings that merely mention "drop"/"issue" in a non-retraction sense.
+ */
+export const SELF_RETRACTION_PATTERNS = [
+  /\bdisregard\b/i,
+  /\bnever ?mind\b/i,
+  /\bnvm\b/i,
+  /\bscratch that\b/i,
+  /this technically works/i,
+  /\bactually (?:ok|okay|fine|correct|safe|allowed|valid|harmless)\b/i,
+  /\bnot (?:actually|really) an? (?:bug|issue|problem|defect|concern|vulnerability|error)\b/i,
+  /\bnot a (?:real|genuine|true) (?:bug|issue|problem|defect|concern)\b/i,
+  /\balready handles (?:this|it|that)\b/i,
+  /\bexisting code already\b/i,
+  /\bfalse[ -]?positive\b/i,
+  /\bdropping (?:this|the) (?:finding|issue|item|one)\b/i,
+  /(?:^|[.!?]\s+)dropping[.!]?\s*$/i,
+  /\b(?:drop|ignore|disregard|retract|withdraw|remove) (?:this|the) finding\b/i,
+  /\bon (?:second|closer) (?:thought|inspection|look|reading|review)\b/i,
+];
+
+/**
+ * True when a finding's title/description contains language the model uses to
+ * undermine its own finding. Such findings must not reach the issue.
+ */
+export function isSelfRetracted(finding) {
+  const text = `${finding?.title ?? ''}\n${finding?.description ?? ''}`;
+  return SELF_RETRACTION_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function dropSelfRetractedFindings(findings, provider) {
+  return findings.filter((finding) => {
+    if (isSelfRetracted(finding)) {
+      stderr.write(`[${provider}] Dropped self-retracted finding: ${finding.title ?? '(untitled)'}\n`);
+      return false;
+    }
+    return true;
+  });
+}
+
 async function main() {
   const provider = parseArgs();
   const diff = readStdin();
@@ -222,9 +267,12 @@ async function main() {
 
   const text = await callApi(provider, diff);
   const findings = parseFindings(text);
+  findings.findings = dropSelfRetractedFindings(findings.findings, provider);
   findings.provider = provider;
 
   stdout.write(JSON.stringify(findings, null, 2));
 }
 
-main();
+if (import.meta.url === pathToFileURL(argv[1] ?? '').href) {
+  main();
+}
