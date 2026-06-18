@@ -34,7 +34,7 @@ inputs:
   gemini-model:
     description: 'Gemini model id.'
     required: false
-    default: 'gemini-3.1-pro-preview'
+    default: 'gemini-3.5-flash'
 
   claude-context-file:
     description: 'Project context file injected into the Claude prompt. Empty disables.'

@@ -69,7 +69,7 @@ const PROVIDERS = {
   gemini: {
     urlTemplate: (model) =>
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-    defaultModel: 'gemini-3.1-pro-preview',
+    defaultModel: 'gemini-3.5-flash',
     envKey: 'GEMINI_API_KEY',
     buildRequest(apiKey, prompt) {
       return {

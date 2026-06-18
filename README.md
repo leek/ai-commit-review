@@ -74,7 +74,7 @@ Any provider whose API key is empty is skipped. Run with one, two, or all three.
 | `gemini-api-key` | _empty_ | Gemini API key. |
 | `claude-model` | `claude-opus-4-7` | Anthropic model id. |
 | `openai-model` | `gpt-5.5` | OpenAI model id. |
-| `gemini-model` | `gemini-3.1-pro-preview` | Gemini model id. |
+| `gemini-model` | `gemini-3.5-flash` | Gemini model id. |
 | `claude-context-file` | _empty_ | Project context file injected into the Claude prompt. |
 | `openai-context-file` | _empty_ | Project context file injected into the OpenAI prompt. |
 | `gemini-context-file` | _empty_ | Project context file injected into the Gemini prompt. |
