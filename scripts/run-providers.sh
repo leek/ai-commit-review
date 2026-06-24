@@ -174,9 +174,10 @@ run_claude_cli_provider() {
   AI_REVIEW_CONTEXT_FILE="${CLAUDE_CONTEXT_FILE:-}" \
   AI_REVIEW_COMMIT_SHA="${COMMIT_SHA:-}" \
   AI_REVIEW_FULL_REPO_CONTEXT=true \
+  AI_REVIEW_INCLUDE_DIFF=false \
   AI_REVIEW_PROMPT_FILE="${PROMPT_FILE:-}" \
     node "$SCRIPT_DIR/ai-review.mjs" --provider claude --print-prompt \
-    < /tmp/filtered-diff.txt \
+    < /dev/null \
     > "$prompt_file" \
     2> "$log_file" || return
 
@@ -240,9 +241,10 @@ run_openai_cli_provider() {
   AI_REVIEW_CONTEXT_FILE="${OPENAI_CONTEXT_FILE:-}" \
   AI_REVIEW_COMMIT_SHA="${COMMIT_SHA:-}" \
   AI_REVIEW_FULL_REPO_CONTEXT=true \
+  AI_REVIEW_INCLUDE_DIFF=false \
   AI_REVIEW_PROMPT_FILE="${PROMPT_FILE:-}" \
     node "$SCRIPT_DIR/ai-review.mjs" --provider openai --print-prompt \
-    < /tmp/filtered-diff.txt \
+    < /dev/null \
     > "$prompt_file" \
     2> "$log_file" || return
 

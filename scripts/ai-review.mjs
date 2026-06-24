@@ -147,11 +147,41 @@ function loadProjectContext(provider) {
   return '';
 }
 
-function buildReviewPrompt(provider, diff) {
-  const promptTemplate = loadPromptTemplate(provider);
+function shouldIncludeDiff() {
+  return process.env.AI_REVIEW_INCLUDE_DIFF !== 'false';
+}
+
+function promptTemplateForMode(promptTemplate) {
+  if (shouldIncludeDiff()) {
+    return promptTemplate;
+  }
+
+  return promptTemplate.replace(/\n*Now analyze this commit diff:\s*$/i, '').trim();
+}
+
+function buildCliReviewTask(commitSha) {
+  if (!commitSha) {
+    stderr.write('AI_REVIEW_COMMIT_SHA is required when AI_REVIEW_INCLUDE_DIFF=false\n');
+    exit(1);
+  }
+
+  return [
+    '## CLI Review Task',
+    '',
+    `Review commit ${commitSha}. No diff is embedded in this prompt.`,
+    '',
+    'You are running inside a full git checkout for this repository. Inspect the commit yourself with read-only commands such as `git show --stat --patch`, `git diff`, `git blame`, `rg`, and file reads. Use surrounding code, tests, routes, configuration, and existing patterns to validate or reject candidate findings.',
+    '',
+    'Do not modify files. Do not review unrelated uncommitted local changes. Findings must still be grounded in lines added or changed by the commit under review.',
+  ].join('\n');
+}
+
+export function buildReviewPrompt(provider, diff) {
+  const promptTemplate = promptTemplateForMode(loadPromptTemplate(provider));
   const projectContext = loadProjectContext(provider);
   const commitSha = process.env.AI_REVIEW_COMMIT_SHA?.trim();
   const hasFullRepoContext = process.env.AI_REVIEW_FULL_REPO_CONTEXT === 'true';
+  const includeDiff = shouldIncludeDiff();
   const commitContext = commitSha
     ? [
         '## Commit Under Review',
@@ -160,19 +190,22 @@ function buildReviewPrompt(provider, diff) {
         ...(hasFullRepoContext
           ? [
               '',
-              'You are running inside a full git checkout for this repository. Use read-only repository inspection to validate the diff against surrounding code, related tests, routes, configuration, and existing patterns before reporting a finding. Do not modify files. The extracted diff below identifies the commit under review; repository context is available only to confirm or reject findings.',
+              includeDiff
+                ? 'You are running inside a full git checkout for this repository. Use read-only repository inspection to validate the diff against surrounding code, related tests, routes, configuration, and existing patterns before reporting a finding. Do not modify files. The extracted diff below identifies the commit under review; repository context is available only to confirm or reject findings.'
+                : 'You are running inside a full git checkout for this repository. Use read-only repository inspection to analyze the commit and validate findings against surrounding code, related tests, routes, configuration, and existing patterns. Do not modify files.',
             ]
           : []),
         '',
       ].join('\n')
     : '';
+  const reviewInput = includeDiff ? diff : buildCliReviewTask(commitSha);
 
   return (
     (projectContext ? `## Project Context\n\n${projectContext}\n\n` : '') +
     commitContext +
     promptTemplate +
     '\n\n' +
-    diff
+    reviewInput
   );
 }
 
@@ -380,7 +413,7 @@ async function main() {
 
   const diff = readStdin();
 
-  if (!diff.trim()) {
+  if (!diff.trim() && (!printPrompt || shouldIncludeDiff())) {
     stderr.write('No diff provided on stdin\n');
     stdout.write(JSON.stringify({ summary: 'Empty diff', findings: [] }));
     exit(0);

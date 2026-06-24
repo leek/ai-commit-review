@@ -80,7 +80,7 @@ The default auth mode for Claude and OpenAI is `auto`, which preserves existing 
 
 The action installs missing `claude` and `codex` commands when CLI mode is selected. Set `install-cli-tools: false` if your runner already has them.
 
-CLI modes run from the caller's checked-out repository and receive the `commit-sha` explicitly. Use `actions/checkout` with `fetch-depth: 0` so the CLIs can inspect the commit and surrounding repository context. The action keeps CLI inspection read-only: Claude is limited to read/search/git shell tools, and Codex runs with `codex-sandbox: read-only` by default.
+CLI modes run from the caller's checked-out repository and receive the `commit-sha` explicitly. Use `actions/checkout` with `fetch-depth: 0` so the CLIs can inspect the commit and surrounding repository context. Unlike API mode, CLI mode does not embed the filtered diff in the prompt; Claude and Codex inspect the commit from the checkout themselves. The action keeps CLI inspection read-only: Claude is limited to read/search/git shell tools, and Codex runs with `codex-sandbox: read-only` by default.
 
 The default Claude model is `claude-opus-4-8`. If you set `install-cli-tools: false`, make sure the runner's Claude Code install supports Opus 4.8.
 

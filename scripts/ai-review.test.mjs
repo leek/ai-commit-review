@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { findingsJsonSchema, isSelfRetracted, parseFindings } from './ai-review.mjs';
+import { buildReviewPrompt, findingsJsonSchema, isSelfRetracted, parseFindings } from './ai-review.mjs';
 
 // Why these matter: the model files a finding then undermines it in the same
 // description. Shipping it wastes a reviewer's time triaging a non-issue, which
@@ -120,4 +120,33 @@ test('schema requires the normalized review shape', () => {
   assert.equal(schema.required.includes('summary'), true);
   assert.equal(schema.required.includes('findings'), true);
   assert.equal(schema.properties.findings.items.required.includes('confidence'), true);
+});
+
+test('CLI prompt mode does not embed the diff', () => {
+  const previousCommitSha = process.env.AI_REVIEW_COMMIT_SHA;
+  const previousIncludeDiff = process.env.AI_REVIEW_INCLUDE_DIFF;
+
+  process.env.AI_REVIEW_COMMIT_SHA = 'abc123';
+  process.env.AI_REVIEW_INCLUDE_DIFF = 'false';
+
+  try {
+    const prompt = buildReviewPrompt('claude', '+do not include this diff line');
+
+    assert.match(prompt, /Review commit abc123/);
+    assert.match(prompt, /No diff is embedded in this prompt/);
+    assert.doesNotMatch(prompt, /Now analyze this commit diff/);
+    assert.doesNotMatch(prompt, /do not include this diff line/);
+  } finally {
+    if (previousCommitSha === undefined) {
+      delete process.env.AI_REVIEW_COMMIT_SHA;
+    } else {
+      process.env.AI_REVIEW_COMMIT_SHA = previousCommitSha;
+    }
+
+    if (previousIncludeDiff === undefined) {
+      delete process.env.AI_REVIEW_INCLUDE_DIFF;
+    } else {
+      process.env.AI_REVIEW_INCLUDE_DIFF = previousIncludeDiff;
+    }
+  }
 });
