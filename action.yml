@@ -23,6 +23,47 @@ inputs:
     required: false
     default: ''
 
+  claude-auth:
+    description: 'Claude provider auth mode: auto, api, or cli. auto uses claude-code-oauth-token when set, otherwise anthropic-api-key.'
+    required: false
+    default: 'auto'
+  openai-auth:
+    description: 'OpenAI provider auth mode: auto, api, or cli. auto uses Codex CLI auth when codex-access-token or codex-auth-json is set, otherwise openai-api-key.'
+    required: false
+    default: 'auto'
+  claude-code-oauth-token:
+    description: 'Claude Code OAuth token from `claude setup-token`. Enables Claude CLI mode in auto auth.'
+    required: false
+    default: ''
+  codex-access-token:
+    description: 'Codex access token for CODEX_ACCESS_TOKEN. Enables Codex CLI mode in auto auth.'
+    required: false
+    default: ''
+  codex-auth-json:
+    description: 'Optional contents of a Codex auth.json file for Codex CLI mode. Use only on trusted private runners.'
+    required: false
+    default: ''
+  codex-home:
+    description: 'Optional CODEX_HOME path for Codex CLI mode. Useful for self-hosted runners with persistent Codex auth.'
+    required: false
+    default: ''
+  install-cli-tools:
+    description: 'Install missing Claude Code or Codex CLI tools when a CLI mode is selected.'
+    required: false
+    default: 'true'
+  claude-cli-path:
+    description: 'Claude Code CLI command path used in Claude CLI mode.'
+    required: false
+    default: 'claude'
+  codex-cli-path:
+    description: 'Codex CLI command path used in OpenAI CLI mode.'
+    required: false
+    default: 'codex'
+  codex-sandbox:
+    description: 'Codex sandbox mode used in OpenAI CLI mode.'
+    required: false
+    default: 'read-only'
+
   claude-model:
     description: 'Anthropic model id.'
     required: false
@@ -175,6 +216,16 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        CLAUDE_AUTH: ${{ inputs.claude-auth }}
+        OPENAI_AUTH: ${{ inputs.openai-auth }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        CODEX_ACCESS_TOKEN: ${{ inputs.codex-access-token }}
+        CODEX_AUTH_JSON: ${{ inputs.codex-auth-json }}
+        CODEX_HOME_INPUT: ${{ inputs.codex-home }}
+        INSTALL_CLI_TOOLS: ${{ inputs.install-cli-tools }}
+        CLAUDE_CLI_PATH: ${{ inputs.claude-cli-path }}
+        CODEX_CLI_PATH: ${{ inputs.codex-cli-path }}
+        CODEX_SANDBOX: ${{ inputs.codex-sandbox }}
         CLAUDE_MODEL: ${{ inputs.claude-model }}
         OPENAI_MODEL: ${{ inputs.openai-model }}
         GEMINI_MODEL: ${{ inputs.gemini-model }}

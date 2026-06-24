@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isSelfRetracted } from './ai-review.mjs';
+import { findingsJsonSchema, isSelfRetracted, parseFindings } from './ai-review.mjs';
 
 // Why these matter: the model files a finding then undermines it in the same
 // description. Shipping it wastes a reviewer's time triaging a non-issue, which
@@ -49,4 +49,75 @@ test('keeps genuine findings, including ones that mention drop/issue innocently'
 test('handles missing title/description without throwing', () => {
   assert.equal(isSelfRetracted({}), false);
   assert.equal(isSelfRetracted({ title: 'Dropping.' }), true);
+});
+
+test('parses direct JSON findings', () => {
+  const parsed = parseFindings(JSON.stringify({
+    summary: 'Clean enough',
+    findings: [],
+  }));
+
+  assert.deepEqual(parsed, {
+    summary: 'Clean enough',
+    findings: [],
+  });
+});
+
+test('parses fenced JSON findings from CLI output', () => {
+  const parsed = parseFindings(`
+\`\`\`json
+{
+  "summary": "One issue",
+  "findings": []
+}
+\`\`\`
+`);
+
+  assert.deepEqual(parsed, {
+    summary: 'One issue',
+    findings: [],
+  });
+});
+
+test('parses nested result JSON from CLI wrapper output', () => {
+  const parsed = parseFindings(JSON.stringify({
+    result: JSON.stringify({
+      summary: 'Wrapped result',
+      findings: [],
+    }),
+  }));
+
+  assert.deepEqual(parsed, {
+    summary: 'Wrapped result',
+    findings: [],
+  });
+});
+
+test('parses final agent message from Codex JSONL output', () => {
+  const parsed = parseFindings([
+    JSON.stringify({ type: 'thread.started', thread_id: 'abc' }),
+    JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'agent_message',
+        text: JSON.stringify({
+          summary: 'Codex result',
+          findings: [],
+        }),
+      },
+    }),
+  ].join('\n'));
+
+  assert.deepEqual(parsed, {
+    summary: 'Codex result',
+    findings: [],
+  });
+});
+
+test('schema requires the normalized review shape', () => {
+  const schema = findingsJsonSchema();
+
+  assert.equal(schema.required.includes('summary'), true);
+  assert.equal(schema.required.includes('findings'), true);
+  assert.equal(schema.properties.findings.items.required.includes('confidence'), true);
 });

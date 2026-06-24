@@ -94,7 +94,7 @@ const PROVIDERS = {
 function parseArgs() {
   const providerIdx = argv.indexOf('--provider');
   if (providerIdx === -1 || !argv[providerIdx + 1]) {
-    stderr.write('Usage: ai-review.mjs --provider claude|openai|gemini\n');
+    stderr.write('Usage: ai-review.mjs --provider claude|openai|gemini [--print-prompt|--print-schema|--normalize]\n');
     exit(1);
   }
   const provider = argv[providerIdx + 1];
@@ -102,11 +102,85 @@ function parseArgs() {
     stderr.write(`Unknown provider: ${provider}. Must be one of: ${Object.keys(PROVIDERS).join(', ')}\n`);
     exit(1);
   }
-  return provider;
+
+  return {
+    provider,
+    printPrompt: argv.includes('--print-prompt'),
+    printSchema: argv.includes('--print-schema'),
+    normalize: argv.includes('--normalize'),
+  };
 }
 
 function readStdin() {
   return readFileSync(stdin.fd, 'utf-8');
+}
+
+function loadPromptTemplate(provider) {
+  const customPromptFile = process.env.AI_REVIEW_PROMPT_FILE?.trim();
+  if (customPromptFile) {
+    const customPath = resolve(process.cwd(), customPromptFile);
+    if (existsSync(customPath)) {
+      stderr.write(`[${provider}] Loaded custom prompt from ${customPromptFile}\n`);
+      return readFileSync(customPath, 'utf-8');
+    } else {
+      stderr.write(`[${provider}] Custom prompt file not found: ${customPromptFile}, using bundled\n`);
+    }
+  }
+
+  return readFileSync(new URL('ai-review-prompt.txt', import.meta.url), 'utf-8');
+}
+
+function loadProjectContext(provider) {
+  const contextFile = process.env.AI_REVIEW_CONTEXT_FILE?.trim();
+  if (!contextFile) {
+    return '';
+  }
+
+  const contextPath = resolve(process.cwd(), contextFile);
+  if (existsSync(contextPath)) {
+    stderr.write(`[${provider}] Loaded project context from ${contextFile}\n`);
+    return readFileSync(contextPath, 'utf-8');
+  }
+
+  stderr.write(`[${provider}] Context file not found: ${contextFile}\n`);
+
+  return '';
+}
+
+function buildReviewPrompt(provider, diff) {
+  const promptTemplate = loadPromptTemplate(provider);
+  const projectContext = loadProjectContext(provider);
+
+  return (projectContext ? `## Project Context\n\n${projectContext}\n\n` : '') + promptTemplate + '\n\n' + diff;
+}
+
+export function findingsJsonSchema() {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['summary', 'findings'],
+    properties: {
+      summary: { type: 'string' },
+      findings: {
+        type: 'array',
+        maxItems: 10,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['severity', 'title', 'description', 'file', 'line', 'fix', 'confidence'],
+          properties: {
+            severity: { enum: ['critical', 'warning', 'info'] },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            file: { type: 'string' },
+            line: { type: ['integer', 'null'] },
+            fix: { type: ['string', 'null'] },
+            confidence: { enum: ['high', 'medium', 'low'] },
+          },
+        },
+      },
+    },
+  };
 }
 
 async function callApi(provider, diff) {
@@ -119,39 +193,7 @@ async function callApi(provider, diff) {
 
   const model = process.env.AI_REVIEW_MODEL?.trim() || config.defaultModel;
   const url = config.urlTemplate ? config.urlTemplate(model) : config.url;
-
-  const customPromptFile = process.env.AI_REVIEW_PROMPT_FILE?.trim();
-  let promptTemplate;
-  if (customPromptFile) {
-    const customPath = resolve(process.cwd(), customPromptFile);
-    if (existsSync(customPath)) {
-      promptTemplate = readFileSync(customPath, 'utf-8');
-      stderr.write(`[${provider}] Loaded custom prompt from ${customPromptFile}\n`);
-    } else {
-      stderr.write(`[${provider}] Custom prompt file not found: ${customPromptFile}, using bundled\n`);
-      promptTemplate = readFileSync(new URL('ai-review-prompt.txt', import.meta.url), 'utf-8');
-    }
-  } else {
-    promptTemplate = readFileSync(new URL('ai-review-prompt.txt', import.meta.url), 'utf-8');
-  }
-
-  const contextFile = process.env.AI_REVIEW_CONTEXT_FILE?.trim();
-  let projectContext = '';
-  if (contextFile) {
-    const contextPath = resolve(process.cwd(), contextFile);
-    if (existsSync(contextPath)) {
-      projectContext = readFileSync(contextPath, 'utf-8');
-      stderr.write(`[${provider}] Loaded project context from ${contextFile}\n`);
-    } else {
-      stderr.write(`[${provider}] Context file not found: ${contextFile}\n`);
-    }
-  }
-
-  const prompt =
-    (projectContext ? `## Project Context\n\n${projectContext}\n\n` : '') +
-    promptTemplate +
-    '\n\n' +
-    diff;
+  const prompt = buildReviewPrompt(provider, diff);
 
   const { headers, body } = config.buildRequest(apiKey, prompt, model);
 
@@ -192,12 +234,65 @@ async function callApi(provider, diff) {
   }
 }
 
-function parseFindings(text) {
+function stripJsonFence(text) {
   const cleaned = text.replace(/^```(?:json)?\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim();
+
+  return cleaned;
+}
+
+function parseJsonLinesForFinalMessage(text) {
+  const messages = [];
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) {
+      continue;
+    }
+
+    try {
+      const event = JSON.parse(trimmed);
+      const item = event.item ?? event;
+
+      if (item?.type === 'agent_message' && typeof item.text === 'string') {
+        messages.push(item.text);
+      } else if (typeof item?.message?.content === 'string') {
+        messages.push(item.message.content);
+      }
+    } catch {
+      // Ignore non-JSONL progress output.
+    }
+  }
+
+  return messages.at(-1) ?? null;
+}
+
+function extractNestedResponseText(parsed) {
+  const candidates = [
+    parsed?.result,
+    parsed?.text,
+    parsed?.content,
+    parsed?.message,
+    parsed?.final_message,
+    parsed?.['final-message'],
+    parsed?.item?.text,
+    parsed?.item?.message?.content,
+  ];
+
+  return candidates.find((candidate) => typeof candidate === 'string' && candidate.trim()) ?? null;
+}
+
+export function parseFindings(text) {
+  const jsonLineMessage = parseJsonLinesForFinalMessage(text);
+  const cleaned = stripJsonFence(jsonLineMessage ?? text);
 
   try {
     const parsed = JSON.parse(cleaned);
     if (!parsed.summary || !Array.isArray(parsed.findings)) {
+      const nestedText = extractNestedResponseText(parsed);
+      if (nestedText) {
+        return parseFindings(nestedText);
+      }
+
       stderr.write('Response missing required fields (summary, findings)\n');
       return { summary: 'Parse error', findings: [] };
     }
@@ -254,12 +349,32 @@ function dropSelfRetractedFindings(findings, provider) {
 }
 
 async function main() {
-  const provider = parseArgs();
+  const { provider, printPrompt, printSchema, normalize } = parseArgs();
+
+  if (printSchema) {
+    stdout.write(JSON.stringify(findingsJsonSchema(), null, 2));
+    exit(0);
+  }
+
   const diff = readStdin();
 
   if (!diff.trim()) {
     stderr.write('No diff provided on stdin\n');
     stdout.write(JSON.stringify({ summary: 'Empty diff', findings: [] }));
+    exit(0);
+  }
+
+  if (printPrompt) {
+    stdout.write(buildReviewPrompt(provider, diff));
+    exit(0);
+  }
+
+  if (normalize) {
+    const findings = parseFindings(diff);
+    findings.findings = dropSelfRetractedFindings(findings.findings, provider);
+    findings.provider = provider;
+
+    stdout.write(JSON.stringify(findings, null, 2));
     exit(0);
   }
 

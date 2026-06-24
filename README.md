@@ -64,6 +64,56 @@ jobs:
 
 Any provider whose API key is empty is skipped. Run with one, two, or all three.
 
+## CLI auth modes
+
+Claude and OpenAI can also run through their local coding CLIs instead of direct API calls:
+
+- **Claude CLI mode** runs `claude -p` through Claude Code.
+- **OpenAI CLI mode** runs `codex exec` through Codex. The provider is still named `openai` in reports so existing digesting and agreement logic keeps working.
+- **Gemini remains API-key only** for now.
+
+The default auth mode for Claude and OpenAI is `auto`, which preserves existing workflows:
+
+- Claude uses CLI mode when `claude-code-oauth-token` is set; otherwise it uses `anthropic-api-key`.
+- OpenAI uses CLI mode when `codex-access-token` or `codex-auth-json` is set; otherwise it uses `openai-api-key`.
+- Set `claude-auth` or `openai-auth` to `api` or `cli` to force a mode.
+
+The action installs missing `claude` and `codex` commands when CLI mode is selected. Set `install-cli-tools: false` if your runner already has them.
+
+### Example: Claude Code + Codex CLI
+
+```yaml
+- uses: leek/ai-commit-review@v1
+  with:
+    commit-sha: ${{ matrix.commit.sha }}
+    claude-auth: cli
+    openai-auth: cli
+    claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    codex-access-token: ${{ secrets.CODEX_ACCESS_TOKEN }}
+    claude-context-file: CLAUDE.md
+    openai-context-file: CLAUDE.md
+```
+
+### Example: Codex CLI with auth.json
+
+Use this only on trusted private automation. `auth.json` contains access tokens.
+
+```yaml
+- uses: leek/ai-commit-review@v1
+  with:
+    commit-sha: ${{ matrix.commit.sha }}
+    openai-auth: cli
+    codex-auth-json: ${{ secrets.CODEX_AUTH_JSON }}
+```
+
+### Where to get CLI tokens
+
+- Claude Code: run `claude setup-token`, then store the printed token as `CLAUDE_CODE_OAUTH_TOKEN`. Anthropic documents this in [Generate a long-lived token](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token).
+- Codex access token: create a token in ChatGPT admin settings and store it as `CODEX_ACCESS_TOKEN`. OpenAI documents this in [Codex access tokens](https://developers.openai.com/codex/enterprise/access-tokens).
+- Codex `auth.json`: sign in locally with `codex login`, then seed a trusted runner or CI secret with the file contents. By default the file is at `~/.codex/auth.json`; on macOS you can copy it with `pbcopy < ~/.codex/auth.json`. OpenAI documents the advanced workflow in [Maintain Codex account auth in CI/CD](https://developers.openai.com/codex/auth/ci-cd-auth).
+
+Do not expose CLI account credentials to public repositories, fork-triggered workflows, or untrusted runners.
+
 ## Inputs
 
 | Input | Default | Description |
@@ -72,6 +122,16 @@ Any provider whose API key is empty is skipped. Run with one, two, or all three.
 | `anthropic-api-key` | _empty_ | Anthropic API key. Provider runs only when set. |
 | `openai-api-key` | _empty_ | OpenAI API key. |
 | `gemini-api-key` | _empty_ | Gemini API key. |
+| `claude-auth` | `auto` | Claude provider auth mode: `auto`, `api`, or `cli`. |
+| `openai-auth` | `auto` | OpenAI provider auth mode: `auto`, `api`, or `cli`. |
+| `claude-code-oauth-token` | _empty_ | Claude Code OAuth token from `claude setup-token`. Enables Claude CLI mode in `auto`. |
+| `codex-access-token` | _empty_ | Codex access token passed as `CODEX_ACCESS_TOKEN`. Enables Codex CLI mode in `auto`. |
+| `codex-auth-json` | _empty_ | Contents of a Codex `auth.json` file for Codex CLI mode. Use only on trusted private runners. |
+| `codex-home` | _empty_ | Optional `CODEX_HOME` path for Codex CLI mode. Useful for self-hosted runners with persistent auth. |
+| `install-cli-tools` | `true` | Install missing Claude Code or Codex CLI tools when a CLI mode is selected. |
+| `claude-cli-path` | `claude` | Claude Code CLI command path used in Claude CLI mode. |
+| `codex-cli-path` | `codex` | Codex CLI command path used in OpenAI CLI mode. |
+| `codex-sandbox` | `read-only` | Codex sandbox mode used in OpenAI CLI mode. |
 | `claude-model` | `claude-opus-4-7` | Anthropic model id. |
 | `openai-model` | `gpt-5.5` | OpenAI model id. |
 | `gemini-model` | `gemini-3.5-flash` | Gemini model id. |
@@ -143,7 +203,7 @@ Any provider whose API key is empty is skipped. Run with one, two, or all three.
 
 1. **Skip check** — matches the commit subject and author against your skip patterns.
 2. **Diff filter** — `git diff sha~1 sha` with your `exclude-paths` applied. Skips if larger than `max-diff-lines`.
-3. **Provider fan-out** — runs Claude, GPT, Gemini in sequence. Each provider receives the bundled (or custom) prompt, optional project context, and the diff.
+3. **Provider fan-out** — runs Claude, GPT/OpenAI, and Gemini in sequence. Claude and OpenAI can use either direct API calls or their CLI modes. Each provider receives the bundled (or custom) prompt, optional project context, and the diff.
 4. **Digest** — merges findings, dedupes by file + line proximity + severity, builds a markdown report, files it as an issue. Optionally opens a draft fix PR for high-confidence findings that multiple models agree on.
 
 ## Permissions
@@ -162,6 +222,7 @@ permissions:
 - The action does not enumerate commits. Drive the matrix from your workflow so failures isolate per-commit.
 - Existing issues for the same short SHA are detected and creation is skipped.
 - All API calls have two retries on 5xx responses.
+- CLI modes normalize their output through the same findings parser and self-retraction filter as API modes.
 
 ## License
 
