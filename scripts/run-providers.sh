@@ -129,6 +129,24 @@ normalize_provider_output() {
   fi
 }
 
+ensure_codex_config() {
+  local codex_home="$1"
+  local config_file="${codex_home}/config.toml"
+  local project_doc_fallback='project_doc_fallback_filenames = ["CLAUDE.md"]'
+
+  mkdir -p "$codex_home"
+  chmod 700 "$codex_home"
+  touch "$config_file"
+  chmod 600 "$config_file"
+
+  if grep -Eq '^[[:space:]]*project_doc_fallback_filenames[[:space:]]*=' "$config_file"; then
+    sed -i.bak -E "s|^[[:space:]]*project_doc_fallback_filenames[[:space:]]*=.*|${project_doc_fallback}|" "$config_file"
+    rm -f "${config_file}.bak"
+  else
+    printf '\n%s\n' "$project_doc_fallback" >> "$config_file"
+  fi
+}
+
 run_api_provider() {
   local provider="$1"
   local key_var="$2"
@@ -231,10 +249,11 @@ run_openai_cli_provider() {
     chmod 700 "$codex_home"
     printf '%s' "$CODEX_AUTH_JSON" > "$codex_home/auth.json"
     chmod 600 "$codex_home/auth.json"
-  elif [ -n "$codex_home" ]; then
-    mkdir -p "$codex_home"
-    chmod 700 "$codex_home"
+  elif [ -z "$codex_home" ]; then
+    codex_home="${HOME:-${RUNNER_TEMP:-/tmp}/ai-commit-review-codex}/.codex"
   fi
+
+  ensure_codex_config "$codex_home"
 
   install_cli_if_needed openai "$command_path" || return
 

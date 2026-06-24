@@ -82,6 +82,8 @@ The action installs missing `claude` and `codex` commands when CLI mode is selec
 
 CLI modes run from the caller's checked-out repository and receive the `commit-sha` explicitly. Use `actions/checkout` with `fetch-depth: 0` so the CLIs can inspect the commit and surrounding repository context. Unlike API mode, CLI mode does not embed the filtered diff in the prompt; Claude and Codex inspect the commit from the checkout themselves. The action keeps CLI inspection read-only: Claude is limited to read/search/git shell tools, and Codex runs with `codex-sandbox: read-only` by default.
 
+Codex CLI mode writes `project_doc_fallback_filenames = ["CLAUDE.md"]` to `CODEX_HOME/config.toml`, so repositories that use `CLAUDE.md` instead of `AGENTS.md` are still picked up by Codex's project-doc discovery.
+
 The default Claude model is `claude-opus-4-8`. If you set `install-cli-tools: false`, make sure the runner's Claude Code install supports Opus 4.8.
 
 ### Example: Claude Code + Codex CLI
@@ -94,8 +96,6 @@ The default Claude model is `claude-opus-4-8`. If you set `install-cli-tools: fa
     openai-auth: cli
     claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     codex-access-token: ${{ secrets.CODEX_ACCESS_TOKEN }}
-    claude-context-file: CLAUDE.md
-    openai-context-file: CLAUDE.md
 ```
 
 ### Example: Codex CLI with auth.json
