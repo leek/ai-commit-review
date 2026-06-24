@@ -150,8 +150,30 @@ function loadProjectContext(provider) {
 function buildReviewPrompt(provider, diff) {
   const promptTemplate = loadPromptTemplate(provider);
   const projectContext = loadProjectContext(provider);
+  const commitSha = process.env.AI_REVIEW_COMMIT_SHA?.trim();
+  const hasFullRepoContext = process.env.AI_REVIEW_FULL_REPO_CONTEXT === 'true';
+  const commitContext = commitSha
+    ? [
+        '## Commit Under Review',
+        '',
+        `Commit SHA: ${commitSha}`,
+        ...(hasFullRepoContext
+          ? [
+              '',
+              'You are running inside a full git checkout for this repository. Use read-only repository inspection to validate the diff against surrounding code, related tests, routes, configuration, and existing patterns before reporting a finding. Do not modify files. The extracted diff below identifies the commit under review; repository context is available only to confirm or reject findings.',
+            ]
+          : []),
+        '',
+      ].join('\n')
+    : '';
 
-  return (projectContext ? `## Project Context\n\n${projectContext}\n\n` : '') + promptTemplate + '\n\n' + diff;
+  return (
+    (projectContext ? `## Project Context\n\n${projectContext}\n\n` : '') +
+    commitContext +
+    promptTemplate +
+    '\n\n' +
+    diff
+  );
 }
 
 export function findingsJsonSchema() {

@@ -3,6 +3,8 @@ set -uo pipefail
 
 : "${SCRIPT_DIR:?SCRIPT_DIR must be set}"
 
+REVIEW_WORKSPACE="${GITHUB_WORKSPACE:-$PWD}"
+
 mkdir -p claude-findings openai-findings gemini-findings
 
 lower() {
@@ -170,6 +172,8 @@ run_claude_cli_provider() {
   install_cli_if_needed claude "$command_path" || return
 
   AI_REVIEW_CONTEXT_FILE="${CLAUDE_CONTEXT_FILE:-}" \
+  AI_REVIEW_COMMIT_SHA="${COMMIT_SHA:-}" \
+  AI_REVIEW_FULL_REPO_CONTEXT=true \
   AI_REVIEW_PROMPT_FILE="${PROMPT_FILE:-}" \
     node "$SCRIPT_DIR/ai-review.mjs" --provider claude --print-prompt \
     < /tmp/filtered-diff.txt \
@@ -184,19 +188,22 @@ run_claude_cli_provider() {
   if [ -n "$model" ]; then
     args+=(--model "$model")
   fi
-  args+=(--allowedTools "")
+  args+=(--allowedTools "Read,Grep,Glob,Bash(git *),Bash(rg *),Bash(sed *),Bash(cat *),Bash(pwd),Bash(ls *)")
   args+=(--json-schema "$(cat "$schema_file")")
   args+=(--no-session-persistence)
 
-  local claude_env=(ANTHROPIC_API_KEY= ANTHROPIC_AUTH_TOKEN=)
+  local claude_env=()
   if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
     claude_env+=(CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN")
   fi
 
-  env "${claude_env[@]}" "$command_path" "${args[@]}" \
-    < "$prompt_file" \
-    > "$raw_file" \
-    2>> "$log_file" || true
+  (
+    cd "$REVIEW_WORKSPACE" || exit 1
+    env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN "${claude_env[@]}" "$command_path" "${args[@]}" \
+      < "$prompt_file" \
+      > "$raw_file" \
+      2>> "$log_file" || true
+  )
 
   normalize_provider_output claude "$raw_file" "$log_file"
 
@@ -231,6 +238,8 @@ run_openai_cli_provider() {
   install_cli_if_needed openai "$command_path" || return
 
   AI_REVIEW_CONTEXT_FILE="${OPENAI_CONTEXT_FILE:-}" \
+  AI_REVIEW_COMMIT_SHA="${COMMIT_SHA:-}" \
+  AI_REVIEW_FULL_REPO_CONTEXT=true \
   AI_REVIEW_PROMPT_FILE="${PROMPT_FILE:-}" \
     node "$SCRIPT_DIR/ai-review.mjs" --provider openai --print-prompt \
     < /tmp/filtered-diff.txt \
@@ -241,13 +250,13 @@ run_openai_cli_provider() {
 
   echo "[openai] Running review with Codex CLI (model: ${model:-default})"
 
-  local args=(exec --sandbox "${CODEX_SANDBOX:-read-only}" --output-schema "$schema_file" -o "$raw_file")
+  local args=(exec --cd "$REVIEW_WORKSPACE" --sandbox "${CODEX_SANDBOX:-read-only}" --output-schema "$schema_file" -o "$raw_file")
   if [ -n "$model" ]; then
     args+=(--model "$model")
   fi
   args+=("Return only the requested JSON object for the code review prompt provided on stdin.")
 
-  local codex_env=(OPENAI_API_KEY= CODEX_API_KEY=)
+  local codex_env=()
   if [ -n "$codex_home" ]; then
     codex_env+=(CODEX_HOME="$codex_home")
   fi
@@ -255,7 +264,7 @@ run_openai_cli_provider() {
     codex_env+=(CODEX_ACCESS_TOKEN="$CODEX_ACCESS_TOKEN")
   fi
 
-  env "${codex_env[@]}" "$command_path" "${args[@]}" \
+  env -u OPENAI_API_KEY -u CODEX_API_KEY "${codex_env[@]}" "$command_path" "${args[@]}" \
     < "$prompt_file" \
     >> "$log_file" \
     2>&1 || true

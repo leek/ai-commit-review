@@ -216,6 +216,7 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        COMMIT_SHA: ${{ inputs.commit-sha }}
         CLAUDE_AUTH: ${{ inputs.claude-auth }}
         OPENAI_AUTH: ${{ inputs.openai-auth }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
